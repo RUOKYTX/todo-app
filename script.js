@@ -66,11 +66,8 @@ function render() {
     list.appendChild(item);
   });
 
-  // 更新统计与空状态提示
-  const doneCount = tasks.filter((t) => t.done).length;
-  counter.textContent = tasks.length
-    ? `共 ${tasks.length} 项，已完成 ${doneCount} 项`
-    : "";
+  // 更新统计行（统一由 updateUnfinishedCount 输出）与空状态提示
+  updateUnfinishedCount();
   emptyTip.style.display = tasks.length ? "none" : "block";
 }
 
@@ -84,6 +81,18 @@ function addTask(text) {
   tasks.push({ id: Date.now(), text: trimmed, done: false });
   saveTasks();
   render();
+  updateUnfinishedCount(); // 添加后未完成数量 +1
+}
+
+// 更新统计信息：已完成/未完成合并显示在一行；无任务时不显示
+function updateUnfinishedCount() {
+  const total = tasks.length;
+  if (!total) {
+    counter.textContent = ""; // 无任务时不显示统计行
+    return;
+  }
+  const doneCount = tasks.filter((t) => t.done).length;
+  counter.textContent = `共 ${total} 项，已完成 ${doneCount} 项，未完成 ${total - doneCount} 项`;
 }
 
 // 切换任务的完成状态
@@ -93,6 +102,7 @@ function toggleTask(id) {
   task.done = !task.done;
   saveTasks();
   render();
+  updateUnfinishedCount(); // 勾选后未完成数量 -1，取消勾选 +1
 }
 
 // 修改任务的文字内容
@@ -109,6 +119,7 @@ function deleteTask(id) {
   tasks = tasks.filter((t) => t.id !== id);
   saveTasks();
   render();
+  updateUnfinishedCount(); // 删除未完成任务后数量 -1
 }
 
 /* ---------- 编辑任务文字（双击进入编辑） ---------- */
@@ -196,8 +207,9 @@ function showToday() {
   dateText.textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${week[now.getDay()]}`;
 }
 
-// 页面加载：读取本地数据 → 渲染列表 → 显示日期
+// 页面加载：读取本地数据 → 渲染列表 → 显示日期 → 显示未完成数量
 tasks = loadTasks();
 render();
 showToday();
+updateUnfinishedCount(); // 刷新后从未完成任务中恢复数量
 input.focus();
