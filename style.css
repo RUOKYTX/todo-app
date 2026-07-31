@@ -1,0 +1,195 @@
+/* ========== 全局基础 ========== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  min-height: 100vh;
+  /* 柔和渐变背景，简洁现代 */
+  background: linear-gradient(160deg, #f0f4ff 0%, #fdf2f8 100%);
+  display: flex;
+  justify-content: center;
+  padding: 48px 16px;
+  color: #1f2937;
+}
+
+/* ========== 应用卡片 ========== */
+.app {
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(31, 41, 55, 0.1);
+  padding: 32px 28px;
+  align-self: flex-start;
+}
+
+.app-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.app-header p {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #9ca3af;
+}
+
+/* ========== 输入区 ========== */
+.add-form {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.add-form input {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 15px;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.add-form input:focus {
+  border-color: #6366f1;
+}
+
+#add-btn {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 12px;
+  background: #6366f1;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+#add-btn:hover {
+  background: #4f46e5;
+}
+
+#add-btn:active {
+  transform: scale(0.94);
+}
+
+/* ========== 统计与空状态 ========== */
+.counter {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #9ca3af;
+}
+
+.empty-tip {
+  margin-top: 32px;
+  text-align: center;
+  color: #c4c9d3;
+  font-size: 15px;
+}
+
+/* ========== 任务列表 ========== */
+.task-list {
+  list-style: none;
+  margin-top: 12px;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  animation: fade-in 0.25s ease;
+}
+
+/* 自定义圆形勾选框 */
+.checkbox {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 2px solid #d1d5db;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: transparent;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.task-item.done .checkbox {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
+
+.task-text {
+  flex: 1;
+  font-size: 15px;
+  line-height: 1.5;
+  word-break: break-all;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+/* 已完成任务的文字样式：变灰 + 删除线 */
+.task-item.done .task-text {
+  color: #b0b6c0;
+  text-decoration: line-through;
+}
+
+/* 编辑任务文字的行内输入框（双击任务文字出现） */
+.edit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 15px;
+  font-family: inherit;
+  color: #1f2937;
+  border: 2px solid #6366f1;
+  border-radius: 8px;
+  outline: none;
+  background: #f8f9ff;
+}
+
+/* 删除按钮 */
+.delete-btn {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #d1d5db;
+  font-size: 17px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+/* 任务淡入动画 */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>待办清单</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <!-- 顶部标题区 -->
+    <header class="app-header">
+      <h1>今日待办</h1>
+      <p id="date-text"></p>
+    </header>
+
+    <!-- 添加任务的输入区 -->
+    <form id="add-form" class="add-form">
+      <input
+        type="text"
+        id="task-input"
+        placeholder="添加新的待办任务，按回车确认…"
+        maxlength="100"
+        autocomplete="off"
+      >
+      <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
+    </form>
+
+    <!-- 任务统计 -->
+    <p id="counter" class="counter"></p>
+
+    <!-- 任务列表 -->
+    <ul id="task-list" class="task-list"></ul>
+
+    <!-- 空状态提示 -->
+    <p id="empty-tip" class="empty-tip">暂无任务，先添加一条吧 ✨</p>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
