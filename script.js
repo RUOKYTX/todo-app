@@ -1,10 +1,30 @@
 /* ========== 待办任务核心逻辑 ========== */
 
-// localStorage 的存储键名
-const STORAGE_KEY = "todo-app-tasks";
-
 // 任务数组：每个任务为 { id, text, done }
 let tasks = [];
+
+/* ---------- Supabase 连接（替代 localStorage 存储） ---------- */
+
+// Project URL 与 anon 公钥（publishable 公钥可安全暴露在前端）
+const SUPABASE_URL = "https://wctszhnobkiasoksbool.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_bv7RoCVKh4TJZRyf9S0gCg_mKYzrkg0";
+
+// 创建 Supabase 客户端（由 CDN 引入的全局 supabase 对象提供）
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// 从 Supabase 拉取全部任务，按创建时间排序；数据库行 → 前端对象映射
+async function fetchTasks() {
+  const { data, error } = await supabaseClient
+    .from("todos")
+    .select("*")
+    .order("created_at");
+  if (error) {
+    console.error("加载任务失败：", error.message);
+    return [];
+  }
+  // 数据库字段 task/done → 前端字段 text/done，id 直接复用主键
+  return data.map((row) => ({ id: row.id, text: row.task, done: row.done }));
+}
 
 /* ---------- 页面元素引用 ---------- */
 const form = document.getElementById("add-form");
@@ -13,26 +33,6 @@ const list = document.getElementById("task-list");
 const counter = document.getElementById("counter");
 const emptyTip = document.getElementById("empty-tip");
 const dateText = document.getElementById("date-text");
-
-/* ---------- 数据存取：localStorage 持久化 ---------- */
-
-// 保存任务到浏览器本地（刷新不丢的关键）
-function saveTasks() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-}
-
-// 从浏览器本地读取任务；首次访问则返回空数组
-function loadTasks() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // 数据损坏时清掉坏数据，避免页面崩溃
-    localStorage.removeItem(STORAGE_KEY);
-    return [];
-  }
-}
 
 /* ---------- 渲染 ---------- */
 
@@ -51,7 +51,7 @@ function render() {
     box.className = "checkbox";
     box.textContent = "✓";
 
-    // 任务文字（点击同样可切换状态）
+    // 任务文字（双击进入编辑）
     const text = document.createElement("span");
     text.className = "task-text";
     text.textContent = task.text;
@@ -74,12 +74,20 @@ function render() {
 /* ---------- 事件处理 ---------- */
 
 // 添加任务
-function addTask(text) {
+async function addTask(text) {
   const trimmed = text.trim();
   if (!trimmed) return; // 空输入忽略
 
-  tasks.push({ id: Date.now(), text: trimmed, done: false });
-  saveTasks();
+  // 插入新行：task 文字 + done=false，created_at 由数据库自动生成
+  const { error } = await supabaseClient
+    .from("todos")
+    .insert({ task: trimmed, done: false });
+  if (error) {
+    console.error("添加任务失败：", error.message);
+    return;
+  }
+
+  tasks = await fetchTasks(); // 重新拉取，保证与数据库一致
   render();
   updateUnfinishedCount(); // 添加后未完成数量 +1
 }
@@ -96,28 +104,55 @@ function updateUnfinishedCount() {
 }
 
 // 切换任务的完成状态
-function toggleTask(id) {
-  const task = tasks.find((t) => t.id === id);
+async function toggleTask(id) {
+  // id 统一转字符串比较（数据库 id 可能是数字或 uuid）
+  const task = tasks.find((t) => String(t.id) === id);
   if (!task) return;
-  task.done = !task.done;
-  saveTasks();
+
+  // 按主键 id 更新 done 字段
+  const { error } = await supabaseClient
+    .from("todos")
+    .update({ done: !task.done })
+    .eq("id", id);
+  if (error) {
+    console.error("更新完成状态失败：", error.message);
+    return;
+  }
+
+  tasks = await fetchTasks();
   render();
   updateUnfinishedCount(); // 勾选后未完成数量 -1，取消勾选 +1
 }
 
 // 修改任务的文字内容
-function updateTask(id, newText) {
-  const task = tasks.find((t) => t.id === id);
-  if (!task) return;
-  task.text = newText;
-  saveTasks();
+async function updateTask(id, newText) {
+  // 按主键 id 更新 task 字段
+  const { error } = await supabaseClient
+    .from("todos")
+    .update({ task: newText })
+    .eq("id", id);
+  if (error) {
+    console.error("修改任务失败：", error.message);
+    return;
+  }
+
+  tasks = await fetchTasks();
   render();
 }
 
 // 删除任务
-function deleteTask(id) {
-  tasks = tasks.filter((t) => t.id !== id);
-  saveTasks();
+async function deleteTask(id) {
+  // 按主键 id 删除行
+  const { error } = await supabaseClient
+    .from("todos")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    console.error("删除任务失败：", error.message);
+    return;
+  }
+
+  tasks = await fetchTasks();
   render();
   updateUnfinishedCount(); // 删除未完成任务后数量 -1
 }
@@ -126,8 +161,8 @@ function deleteTask(id) {
 
 // 把任务文字替换为输入框进行编辑
 function startEdit(item, textEl) {
-  const id = Number(item.dataset.id);
-  const task = tasks.find((t) => t.id === id);
+  const id = item.dataset.id;
+  const task = tasks.find((t) => String(t.id) === id);
   if (!task) return;
 
   // 创建编辑输入框，预填原文字
@@ -147,12 +182,12 @@ function startEdit(item, textEl) {
     finished = true;
 
     const newText = editInput.value.trim();
-    // 保存时：内容非空才更新，且内容有变化才渲染
+    // 保存时：内容非空且发生变化才写入数据库
     if (save && newText && newText !== task.text) {
-      task.text = newText;
-      saveTasks();
+      updateTask(task.id, newText); // 异步写入 Supabase，完成后自动刷新渲染
+      return;
     }
-    render();
+    render(); // 取消或内容未变：直接恢复原列表
   }
 
   // 回车 → 保存；Esc → 取消
@@ -189,7 +224,7 @@ list.addEventListener("dblclick", (e) => {
 list.addEventListener("click", (e) => {
   const item = e.target.closest(".task-item");
   if (!item) return;
-  const id = Number(item.dataset.id);
+  const id = item.dataset.id;
 
   if (e.target.classList.contains("delete-btn")) {
     deleteTask(id);
@@ -207,9 +242,12 @@ function showToday() {
   dateText.textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${week[now.getDay()]}`;
 }
 
-// 页面加载：读取本地数据 → 渲染列表 → 显示日期 → 显示未完成数量
-tasks = loadTasks();
-render();
-showToday();
-updateUnfinishedCount(); // 刷新后从未完成任务中恢复数量
-input.focus();
+// 页面加载：从 Supabase 拉取任务 → 渲染列表 → 显示日期 → 显示未完成数量
+async function init() {
+  tasks = await fetchTasks();
+  render();
+  showToday();
+  updateUnfinishedCount(); // 从云端数据恢复数量
+  input.focus();
+}
+init();
