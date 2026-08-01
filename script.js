@@ -9,6 +9,9 @@ let currentUser = null;
 // 实时订阅通道（登录时建立，登出时移除）
 let tasksChannel = null;
 
+// 本页最近操作影响的数据库行 id：订阅回调据此跳过自己的事件，避免双重刷新
+const recentIds = new Set();
+
 /* ---------- Supabase 客户端 ---------- */
 
 // Project URL 与 anon 公钥（publishable 公钥可安全暴露在前端）
@@ -73,7 +76,7 @@ async function fetchTasks() {
     .order("created_at");
   if (error) {
     console.error("加载任务失败：", error.message);
-    return [];
+    return null; // 返回 null 表示拉取失败（调用方据此保留现状，避免误清列表）
   }
   // 数据库字段 task/done → 前端字段 text/done，id 直接复用主键
   return data.map((row) => ({ id: row.id, text: row.task, done: row.done }));
@@ -81,7 +84,8 @@ async function fetchTasks() {
 
 // 登录后：拉任务 + 渲染 + 建立实时订阅
 async function loadTasksForUser() {
-  tasks = await fetchTasks();
+  const fresh = await fetchTasks();
+  if (fresh !== null) tasks = fresh; // 初始加载失败则保持空列表（空状态提示兜底）
   render();
   subscribeRealtime();
 }
@@ -98,9 +102,19 @@ function subscribeRealtime() {
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "todos" },
-      async () => {
-        tasks = await fetchTasks();
-        render();
+      async (payload) => {
+        // 取事件涉及的行 id（insert/update 看 new，delete 看 old）
+        const eventId = payload.new?.id ?? payload.old?.id;
+        // 自己发起的操作（id 在 recentIds 中）→ 跳过，避免双重刷新
+        if (eventId !== undefined && recentIds.has(eventId)) {
+          recentIds.delete(eventId);
+          return;
+        }
+        const fresh = await fetchTasks();
+        if (fresh !== null) {
+          tasks = fresh;
+          render();
+        }
       }
     )
     .subscribe();
@@ -118,12 +132,16 @@ function unsubscribeRealtime() {
 
 // 根据 tasks 数组重绘整个列表
 function render() {
+  // 记录重建前的任务 id 集合：只给"新添加"的任务播放淡入动画
+  const prevIds = new Set([...list.children].map((li) => li.dataset.id));
+
   list.innerHTML = "";
 
   tasks.forEach((task) => {
-    // 创建任务项 <li>
+    // 创建任务项 <li>（新任务带 new-item 类触发淡入，其余不重播动画避免闪烁）
     const item = document.createElement("li");
-    item.className = "task-item" + (task.done ? " done" : "");
+    const isNew = !prevIds.has(String(task.id));
+    item.className = "task-item" + (task.done ? " done" : "") + (isNew ? " new-item" : "");
     item.dataset.id = task.id;
 
     // 圆形勾选框（点击切换完成状态）
@@ -153,23 +171,50 @@ function render() {
 
 /* ---------- 事件处理 ---------- */
 
-// 添加任务：自动带上当前用户的 user_id
+// 临时 id 自增器（负数，不与数据库正 id 冲突）：乐观插入时占位用
+let tempIdCounter = 0;
+
+// 添加任务：乐观更新（本地立即显示，后台写库，成功后静默替换真实 id）
 async function addTask(text) {
   const trimmed = text.trim();
   if (!trimmed || !currentUser) return; // 空输入或未登录时忽略
 
-  // 插入新行：task 文字 + done=false + 当前用户 id，created_at 由数据库自动生成
-  const { error } = await supabaseClient
+  // ① 乐观：本地用临时负 id 插入并立即渲染（任务瞬间出现）
+  const tempId = --tempIdCounter;
+  tasks.push({ id: tempId, text: trimmed, done: false });
+  render();
+  updateUnfinishedCount();
+
+  // ② 后台插入（.select() 拿数据库生成的真实 id）
+  const { data, error } = await supabaseClient
     .from("todos")
-    .insert({ task: trimmed, done: false, user_id: currentUser.id });
+    .insert({ task: trimmed, done: false, user_id: currentUser.id })
+    .select();
   if (error) {
+    // 失败：移除自己的临时行 + 尽力对齐（对齐失败时保留本地回滚后的列表）
     console.error("添加任务失败：", error.message);
+    tasks = tasks.filter((t) => t.id !== tempId);
+    const fresh = await fetchTasks();
+    if (fresh !== null) {
+      tasks = fresh;
+      render();
+      updateUnfinishedCount();
+      return;
+    }
+    render();
+    updateUnfinishedCount();
     return;
   }
 
-  tasks = await fetchTasks(); // 重新拉取，保证与数据库一致
-  render();
-  updateUnfinishedCount(); // 添加后未完成数量 +1
+  // ③ 成功：真实 id 静默替换（只改数组项与对应 li 的 dataset.id，不整表重渲染）
+  const realId = data[0].id;
+  recentIds.add(realId); // 跳过 insert 事件，避免重复刷新
+  const idx = tasks.findIndex((t) => t.id === tempId);
+  if (idx !== -1) {
+    tasks[idx].id = realId;
+    const li = list.querySelector(`li[data-id="${tempId}"]`);
+    if (li) li.dataset.id = realId;
+  }
 }
 
 // 更新统计信息：已完成/未完成合并显示在一行；无任务时不显示
@@ -183,57 +228,101 @@ function updateUnfinishedCount() {
   counter.textContent = `共 ${total} 项，已完成 ${doneCount} 项，未完成 ${total - doneCount} 项`;
 }
 
-// 切换任务的完成状态
+// 切换任务的完成状态（乐观更新：立即本地渲染，后台写库）
 async function toggleTask(id) {
   const task = tasks.find((t) => String(t.id) === id);
   if (!task) return;
 
-  // 按主键 id 更新 done 字段
+  // ① 乐观更新：本地立即翻转并渲染，不等网络（消除勾选响应缓慢）
+  task.done = !task.done;
+  recentIds.add(Number(id)); // 防止自己的写入事件触发重复刷新（与事件 id 同为数字）
+  render();
+  updateUnfinishedCount();
+
+  // ② 后台写库（不 select、不 fetchTasks：本地已是最终状态）
   const { error } = await supabaseClient
     .from("todos")
-    .update({ done: !task.done })
+    .update({ done: task.done })
     .eq("id", id);
   if (error) {
+    // ③ 失败：回滚本次翻转 + 尽力对齐（对齐失败时保留回滚后的本地状态）
     console.error("更新完成状态失败：", error.message);
+    recentIds.delete(Number(id));
+    task.done = !task.done;
+    const fresh = await fetchTasks();
+    if (fresh !== null) {
+      tasks = fresh;
+      render();
+      updateUnfinishedCount();
+      return;
+    }
+    render();
+    updateUnfinishedCount();
     return;
   }
-
-  tasks = await fetchTasks();
-  render();
-  updateUnfinishedCount(); // 勾选后未完成数量 -1，取消勾选 +1
 }
 
-// 修改任务的文字内容
-async function updateTask(id, newText) {
-  // 按主键 id 更新 task 字段
+// 修改任务的文字内容（乐观更新：本地立即生效，后台写库，失败回滚对齐）
+async function updateTask(id, newText, oldText) {
+  const task = tasks.find((t) => String(t.id) === String(id));
+  if (!task) return;
+
+  // ① 乐观：本地立即更新并渲染（编辑框即时退出，文字立即变化）
+  task.text = newText;
+  render();
+  recentIds.add(Number(id)); // 跳过 update 事件，避免重复刷新
+
+  // ② 后台写库（不 select、不 fetchTasks：本地已是最终状态）
   const { error } = await supabaseClient
     .from("todos")
     .update({ task: newText })
     .eq("id", id);
   if (error) {
+    // ③ 失败：回滚文字 + 尽力对齐（对齐失败时保留回滚后的本地状态）
     console.error("修改任务失败：", error.message);
-    return;
+    recentIds.delete(Number(id));
+    task.text = oldText;
+    const fresh = await fetchTasks();
+    if (fresh !== null) {
+      tasks = fresh;
+      render();
+      return;
+    }
+    render();
   }
-
-  tasks = await fetchTasks();
-  render();
 }
 
-// 删除任务
+// 删除任务：乐观更新（本地立即移除，后台删除，失败恢复对齐）
 async function deleteTask(id) {
-  // 按主键 id 删除行
+  const target = tasks.find((t) => String(t.id) === id);
+  if (!target) return;
+
+  // ① 乐观：本地立即移除并渲染（任务瞬间消失）
+  tasks = tasks.filter((t) => String(t.id) !== id);
+  render();
+  updateUnfinishedCount();
+  recentIds.add(Number(id)); // 跳过 delete 事件，避免重复刷新
+
+  // ② 后台删除
   const { error } = await supabaseClient
     .from("todos")
     .delete()
     .eq("id", id);
   if (error) {
+    // ③ 失败：恢复被删任务 + 尽力对齐（对齐失败时保留回滚后的本地列表）
     console.error("删除任务失败：", error.message);
-    return;
+    recentIds.delete(Number(id));
+    tasks.push(target);
+    const fresh = await fetchTasks();
+    if (fresh !== null) {
+      tasks = fresh;
+      render();
+      updateUnfinishedCount();
+      return;
+    }
+    render();
+    updateUnfinishedCount();
   }
-
-  tasks = await fetchTasks();
-  render();
-  updateUnfinishedCount(); // 删除未完成任务后数量 -1
 }
 
 /* ---------- 编辑任务文字（双击进入编辑） ---------- */
@@ -261,9 +350,9 @@ function startEdit(item, textEl) {
     finished = true;
 
     const newText = editInput.value.trim();
-    // 保存时：内容非空且发生变化才写入数据库
+    // 保存时：内容非空且发生变化 → 乐观更新（本地立即生效 + 后台写库）
     if (save && newText && newText !== task.text) {
-      updateTask(task.id, newText); // 异步写入 Supabase，完成后自动刷新渲染
+      updateTask(task.id, newText, task.text);
       return;
     }
     render(); // 取消或内容未变：直接恢复原列表
@@ -540,6 +629,9 @@ list.addEventListener("dblclick", (e) => {
 // 事件委托：列表内的点击统一处理（勾选 / 删除）
 // 注意：点击圆圈才勾选，文字留给双击编辑（避免单击重建 DOM 吃掉双击事件）
 list.addEventListener("click", (e) => {
+  // 双击的第二击（e.detail=2）忽略：避免"勾选→取消"来回抖动
+  if (e.detail > 1) return;
+
   const item = e.target.closest(".task-item");
   if (!item) return;
   const id = item.dataset.id;

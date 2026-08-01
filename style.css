@@ -120,6 +120,10 @@ body::before {
   gap: 12px;
   padding: 12px 8px;
   border-bottom: 1px solid #f3f4f6;
+}
+
+/* 仅"新添加"的任务播放淡入动画（整表重建时其他任务不重播，避免抖动闪烁） */
+.task-item.new-item {
   animation: fade-in 0.25s ease;
 }
 
