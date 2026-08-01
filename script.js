@@ -28,13 +28,21 @@ const authSubmitBtn = document.getElementById("auth-submit-btn");
 const authSwitchTip = document.getElementById("auth-switch-tip");
 const authSwitchLink = document.getElementById("auth-switch-link");
 const authError = document.getElementById("auth-error");
-const logoutBtn = document.getElementById("logout-btn");
 const form = document.getElementById("add-form");
 const input = document.getElementById("task-input");
 const list = document.getElementById("task-list");
 const counter = document.getElementById("counter");
 const emptyTip = document.getElementById("empty-tip");
 const dateText = document.getElementById("date-text");
+const avatarBtn = document.getElementById("avatar-btn");
+const avatarMenu = document.getElementById("avatar-menu");
+const modalOverlay = document.getElementById("modal-overlay");
+const modalTitle = document.getElementById("modal-title");
+const modalDesc = document.getElementById("modal-desc");
+const modalBody = document.getElementById("modal-body");
+const modalCancel = document.getElementById("modal-cancel");
+const modalConfirm = document.getElementById("modal-confirm");
+const toast = document.getElementById("toast");
 
 /* ---------- 视图切换（登录前 / 登录后） ---------- */
 
@@ -47,6 +55,7 @@ function showAuthView() {
 function showTodoView() {
   authView.style.display = "none";
   todoView.style.display = "block";
+  renderAvatar(); // 登录后渲染首字头像
   // 登录后：拉取当前用户任务 + 建立实时订阅
   loadTasksForUser();
   input.focus();
@@ -336,9 +345,161 @@ authSwitchLink.addEventListener("click", (e) => {
   setAuthMode(authMode === "login" ? "signup" : "login");
 });
 
-// 退出登录
-logoutBtn.addEventListener("click", () => {
-  supabaseClient.auth.signOut();
+/* ---------- 个人信息（头像 / 密码 / 切换 / 注销） ---------- */
+
+// 当前个人信息操作模式：avatar | password | switch | delete
+let accountAction = null;
+
+// toast 定时器（防止连续提示重叠）
+let toastTimer = null;
+
+// 渲染头像：优先取 user_metadata.avatar_char，否则取邮箱首字符大写
+function renderAvatar() {
+  if (!currentUser) return;
+  const custom = currentUser.user_metadata?.avatar_char;
+  const char = (custom || currentUser.email || "?").trim().charAt(0).toUpperCase();
+  avatarBtn.textContent = char;
+  // 把账户邮箱写入包裹层 data 属性，供悬浮气泡（CSS attr）显示
+  avatarBtn.parentElement.dataset.username = currentUser.email || "?";
+}
+
+// 轻量提示（2.5 秒自动消失）
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.style.display = "block";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.style.display = "none";
+  }, 2500);
+}
+
+// 点击头像：展开/收起个人信息菜单
+avatarBtn.addEventListener("click", (e) => {
+  e.stopPropagation(); // 防止冒泡触发下方 document 关闭监听
+  avatarMenu.classList.toggle("open");
+});
+
+// 点击页面其他区域 → 关闭菜单
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".avatar-wrap")) {
+    avatarMenu.classList.remove("open");
+  }
+});
+
+// 菜单项点击 → 打开对应功能弹窗（退出登录例外：直接登出，无需弹窗）
+avatarMenu.addEventListener("click", (e) => {
+  const item = e.target.closest(".menu-item");
+  if (!item) return;
+  avatarMenu.classList.remove("open");
+
+  const action = item.dataset.action;
+  if (action === "logout") {
+    supabaseClient.auth.signOut(); // 退出登录：直接登出回登录界面
+    return;
+  }
+  openAccountModal(action);
+});
+
+// 打开弹窗并按功能组装内容
+function openAccountModal(action) {
+  accountAction = action;
+  modalBody.innerHTML = ""; // 清空动态内容
+  modalConfirm.classList.remove("danger");
+
+  if (action === "avatar") {
+    modalTitle.textContent = "修改头像";
+    modalDesc.textContent = "输入一个字作为头像展示（留空则恢复默认邮箱首字母）";
+    const input = document.createElement("input");
+    input.className = "modal-input";
+    input.maxLength = 1;
+    input.placeholder = "输入一个字";
+    modalBody.appendChild(input);
+    modalConfirm.textContent = "保存";
+  } else if (action === "password") {
+    modalTitle.textContent = "修改密码";
+    modalDesc.textContent = "输入新密码（至少 6 位），下次登录请使用新密码";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.className = "modal-input";
+    input.minLength = 6;
+    input.placeholder = "新密码";
+    modalBody.appendChild(input);
+    modalConfirm.textContent = "确认修改";
+  } else if (action === "switch") {
+    modalTitle.textContent = "切换账号";
+    modalDesc.textContent = "将退出当前账号并返回登录界面，可切换其他账号登录，确认吗？";
+    modalConfirm.textContent = "切换";
+  } else if (action === "delete") {
+    modalTitle.textContent = "注销账号";
+    modalDesc.textContent = "注销后该账号及其所有任务将被永久删除且无法恢复，确定吗？";
+    modalConfirm.textContent = "确认注销";
+    modalConfirm.classList.add("danger"); // 危险操作红色按钮
+  }
+
+  modalOverlay.style.display = "flex";
+  // 弹窗打开后聚焦输入框
+  const firstInput = modalBody.querySelector("input");
+  if (firstInput) setTimeout(() => firstInput.focus(), 50);
+}
+
+// 关闭弹窗
+function closeAccountModal() {
+  modalOverlay.style.display = "none";
+  accountAction = null;
+  modalConfirm.classList.remove("danger");
+}
+
+modalCancel.addEventListener("click", closeAccountModal);
+
+// 点击遮罩空白区域 → 关闭弹窗
+modalOverlay.addEventListener("click", (e) => {
+  if (e.target === modalOverlay) closeAccountModal();
+});
+
+// 弹窗确认按钮：按模式执行对应操作
+modalConfirm.addEventListener("click", async () => {
+  if (accountAction === "avatar") {
+    // 修改头像：写进 user_metadata（刷新后仍生效）
+    const input = modalBody.querySelector("input");
+    const char = (input?.value || "").trim();
+    const { error } = await supabaseClient.auth.updateUser({
+      data: { avatar_char: char },
+    });
+    if (error) {
+      showToast("修改失败：" + error.message);
+      return;
+    }
+    currentUser = (await supabaseClient.auth.getSession()).data.session?.user;
+    renderAvatar();
+    showToast("头像已更新");
+    closeAccountModal();
+  } else if (accountAction === "password") {
+    // 修改密码
+    const input = modalBody.querySelector("input");
+    const pwd = input?.value || "";
+    if (pwd.length < 6) return; // 前端最小长度校验
+    const { error } = await supabaseClient.auth.updateUser({ password: pwd });
+    if (error) {
+      showToast("修改失败：" + friendlyAuthError(error));
+      return;
+    }
+    showToast("密码已修改");
+    closeAccountModal();
+  } else if (accountAction === "switch") {
+    // 切换账号：登出回登录界面
+    closeAccountModal();
+    supabaseClient.auth.signOut();
+  } else if (accountAction === "delete") {
+    // 注销账号：调用 SECURITY DEFINER 函数，删除账号及其全部任务
+    const { error } = await supabaseClient.rpc("delete_user");
+    if (error) {
+      showToast("注销失败：" + error.message);
+      return;
+    }
+    closeAccountModal();
+    showToast("账号已注销");
+    supabaseClient.auth.signOut();
+  }
 });
 
 /* ---------- 登录状态监听 ---------- */

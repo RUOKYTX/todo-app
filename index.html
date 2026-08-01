@@ -49,7 +49,22 @@
       <header class="app-header">
         <div class="app-header-top">
           <h1>今日待办</h1>
-          <button id="logout-btn" class="logout-btn" aria-label="退出登录">退出登录</button>
+          <div class="header-actions">
+            <!-- 圆形首字头像（点击弹出个人信息菜单） -->
+            <div class="avatar-wrap">
+              <button id="avatar-btn" class="avatar" aria-label="个人信息">A</button>
+              <!-- 个人信息下拉菜单 -->
+              <div id="avatar-menu" class="avatar-menu">
+                <button class="menu-item" data-action="avatar">修改头像</button>
+                <button class="menu-item" data-action="password">修改密码</button>
+                <button class="menu-item" data-action="logout">退出登录</button>
+                <button class="menu-item" data-action="switch">切换账号</button>
+                <button class="menu-item danger" data-action="delete">注销账号</button>
+              </div>
+            </div>
+          </div>
+            </div>
+          </div>
         </div>
         <p id="date-text"></p>
       </header>
@@ -76,6 +91,22 @@
       <p id="empty-tip" class="empty-tip">暂无任务，先添加一条吧 ✨</p>
     </section>
   </main>
+
+  <!-- 通用弹窗：修改头像 / 修改密码 / 切换账号 / 注销账号 -->
+  <div id="modal-overlay" class="modal-overlay">
+    <div class="modal">
+      <h3 id="modal-title"></h3>
+      <p id="modal-desc" class="modal-desc"></p>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="modal-btn secondary">取消</button>
+        <button id="modal-confirm" class="modal-btn primary">确认</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 轻量成功提示 -->
+  <div id="toast" class="toast"></div>
 
   <!-- supabase-js CDN 引入（必须先于 script.js 加载） -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

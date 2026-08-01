@@ -8,12 +8,24 @@
 body {
   font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   min-height: 100vh;
-  /* 柔和渐变背景，简洁现代 */
-  background: linear-gradient(160deg, #f0f4ff 0%, #fdf2f8 100%);
+  /* 柔和紫粉蓝三色对角渐变背景，简洁现代 */
+  background: linear-gradient(160deg, #eef2ff 0%, #fdf2f8 45%, #e0f2fe 100%);
   display: flex;
   justify-content: center;
   padding: 48px 16px;
   color: #1f2937;
+}
+
+/* 背景装饰光斑层：左上淡紫、右下淡蓝，纯装饰不挡交互 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(139, 92, 246, 0.14), transparent 42%),
+    radial-gradient(circle at 85% 80%, rgba(56, 189, 248, 0.12), transparent 42%);
 }
 
 /* ========== 应用卡片 ========== */
@@ -282,19 +294,236 @@ body {
   align-items: center;
 }
 
-.logout-btn {
-  padding: 6px 14px;
-  font-size: 13px;
-  font-family: inherit;
-  border: none;
-  border-radius: 8px;
-  background: #f3f4f6;
-  color: #6b7280;
-  cursor: pointer;
-  transition: all 0.2s;
+/* ========== 头像与个人信息菜单 ========== */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.logout-btn:hover {
-  background: #fee2e2;
+.avatar-wrap {
+  position: relative;
+}
+
+/* 圆形首字头像：紫渐变底白字（放大版，视觉更突出） */
+.avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.45);
+  transition: transform 0.15s, box-shadow 0.2s;
+}
+
+.avatar:hover {
+  transform: scale(1.06);
+  box-shadow: 0 5px 18px rgba(99, 102, 241, 0.6);
+}
+
+/* 悬浮头像显示账户名称的气泡提示（显示在头像上方，避开下方菜单） */
+.avatar-wrap::after {
+  content: attr(data-username);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(31, 41, 55, 0.92);
+  color: #fff;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none; /* 不挡头像点击 */
+  z-index: 30;
+}
+
+/* 气泡底部小箭头，指向头像 */
+.avatar-wrap::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(31, 41, 55, 0.92);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* 悬浮时显示气泡与箭头 */
+.avatar-wrap:hover::after,
+.avatar-wrap:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* 下拉菜单（默认隐藏，JS 加 .open 显示） */
+.avatar-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 150px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.15);
+  padding: 6px;
+  z-index: 20;
+}
+
+.avatar-menu.open {
+  display: block;
+  animation: fade-in 0.15s ease;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 9px 14px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  font-family: inherit;
+  color: #374151;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.menu-item:hover {
+  background: #f3f4f6;
+}
+
+/* 危险操作（注销账号）红色 */
+.menu-item.danger {
   color: #ef4444;
+}
+
+.menu-item.danger:hover {
+  background: #fee2e2;
+}
+
+/* ========== 通用弹窗 ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(17, 24, 39, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+.modal {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 12px 40px rgba(17, 24, 39, 0.25);
+  animation: fade-in 0.2s ease;
+}
+
+.modal h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.modal-desc {
+  font-size: 13px;
+  color: #6b7280;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.modal-input {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.modal-input:focus {
+  border-color: #6366f1;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-btn {
+  padding: 9px 18px;
+  font-size: 14px;
+  font-family: inherit;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.modal-btn.secondary {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.modal-btn.secondary:hover {
+  background: #e5e7eb;
+}
+
+.modal-btn.primary {
+  background: #6366f1;
+  color: #fff;
+}
+
+.modal-btn.primary:hover {
+  background: #4f46e5;
+}
+
+/* 危险确认按钮（注销）红色 */
+.modal-btn.primary.danger {
+  background: #ef4444;
+}
+
+.modal-btn.primary.danger:hover {
+  background: #dc2626;
+}
+
+/* ========== Toast 提示 ========== */
+.toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(31, 41, 55, 0.92);
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  z-index: 60;
+  animation: fade-in 0.2s ease;
+  display: none;
 }
