@@ -8,32 +8,73 @@
 </head>
 <body>
   <main class="app">
-    <!-- 顶部标题区 -->
-    <header class="app-header">
-      <h1>今日待办</h1>
-      <p id="date-text"></p>
-    </header>
+    <!-- ========== 未登录：登录/注册界面 ========== -->
+    <section id="auth-view" class="auth-view">
+      <header class="app-header">
+        <h1>今日待办</h1>
+      </header>
+      <p class="auth-subtitle">登录后管理你的待办任务</p>
 
-    <!-- 添加任务的输入区 -->
-    <form id="add-form" class="add-form">
-      <input
-        type="text"
-        id="task-input"
-        placeholder="添加新的待办任务，按回车确认…"
-        maxlength="100"
-        autocomplete="off"
-      >
-      <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
-    </form>
+      <form id="auth-form" class="auth-form">
+        <input
+          type="email"
+          id="auth-email"
+          placeholder="邮箱"
+          autocomplete="email"
+          required
+        >
+        <input
+          type="password"
+          id="auth-password"
+          placeholder="密码（至少 6 位）"
+          autocomplete="current-password"
+          minlength="6"
+          required
+        >
+        <button type="submit" id="auth-submit-btn">登 录</button>
+      </form>
 
-    <!-- 任务统计（合并显示：共/已完成/未完成，无任务时隐藏） -->
-    <p id="counter" class="counter"></p>
+      <!-- 登录/注册错误提示 -->
+      <p id="auth-error" class="auth-error"></p>
 
-    <!-- 任务列表 -->
-    <ul id="task-list" class="task-list"></ul>
+      <!-- 登录/注册模式切换 -->
+      <p class="auth-switch">
+        <span id="auth-switch-tip">还没有账号？</span>
+        <a href="#" id="auth-switch-link">注册</a>
+      </p>
+    </section>
 
-    <!-- 空状态提示 -->
-    <p id="empty-tip" class="empty-tip">暂无任务，先添加一条吧 ✨</p>
+    <!-- ========== 登录后：任务界面 ========== -->
+    <section id="todo-view" class="todo-view">
+      <header class="app-header">
+        <div class="app-header-top">
+          <h1>今日待办</h1>
+          <button id="logout-btn" class="logout-btn" aria-label="退出登录">退出登录</button>
+        </div>
+        <p id="date-text"></p>
+      </header>
+
+      <!-- 添加任务的输入区 -->
+      <form id="add-form" class="add-form">
+        <input
+          type="text"
+          id="task-input"
+          placeholder="添加新的待办任务，按回车确认…"
+          maxlength="100"
+          autocomplete="off"
+        >
+        <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
+      </form>
+
+      <!-- 任务统计（合并显示：共/已完成/未完成，无任务时隐藏） -->
+      <p id="counter" class="counter"></p>
+
+      <!-- 任务列表 -->
+      <ul id="task-list" class="task-list"></ul>
+
+      <!-- 空状态提示 -->
+      <p id="empty-tip" class="empty-tip">暂无任务，先添加一条吧 ✨</p>
+    </section>
   </main>
 
   <!-- supabase-js CDN 引入（必须先于 script.js 加载） -->
