@@ -76,14 +76,17 @@ body::before {
 }
 
 /* ========== 输入区 ========== */
+/* 两行布局：第一行任务输入+按钮，第二行截止时间+标签 */
 .add-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 24px;
 }
 
-.add-form input {
+#task-input {
   flex: 1;
+  min-width: 0;
   padding: 12px 16px;
   font-size: 15px;
   border: 2px solid #e5e7eb;
@@ -118,10 +121,10 @@ body::before {
   transform: scale(0.94);
 }
 
-/* 添加区的截止时间选择器：紧凑灰字，与任务输入框风格一致 */
+/* 添加区的截止时间选择器：紧凑灰字，与任务输入框风格一致（第二行左半） */
 .due-input {
-  flex-shrink: 0;
-  width: 158px;
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px;
   font-size: 13px;
   font-family: inherit;
@@ -134,6 +137,65 @@ body::before {
 
 .due-input:focus {
   border-color: #6366f1;
+}
+
+/* 添加区的标签输入框：第二行右半，与截止时间等宽均分 */
+.tag-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #374151;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.tag-input:focus {
+  border-color: #6366f1;
+}
+
+/* ========== 标签筛选栏 ========== */
+/* 横向滚动的胶囊栏：全部 + 各标签，标签多时横向滑动不换行挤压 */
+.tag-filter {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox 隐藏滚动条 */
+  padding-bottom: 2px;
+}
+
+.tag-filter::-webkit-scrollbar {
+  display: none; /* Chrome/Safari 隐藏滚动条 */
+}
+
+.tag-filter-btn {
+  flex-shrink: 0;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.tag-filter-btn:hover {
+  border-color: #c7c9f9;
+  color: #6366f1;
+}
+
+/* 选中态：紫色实心高亮 */
+.tag-filter-btn.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
 }
 
 /* ========== 统计与空状态 ========== */
@@ -158,10 +220,149 @@ body::before {
 
 .task-item {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 8px;
   border-bottom: 1px solid #f3f4f6;
+}
+
+/* 任务行第一行：勾选框 + 文字 + 徽章 + 删除按钮（原横向布局） */
+.task-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 标签胶囊区：任务行第二行，缩进对齐勾选框内缘（22px 圆框 + 12px 间距） */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: 34px;
+  margin-top: 8px;
+}
+
+/* 单枚标签胶囊：浅紫底紫字小圆角 */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #4f46e5;
+  user-select: none;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+}
+
+.tag-chip .tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 胶囊内嵌 × 删除钮 */
+.tag-remove {
+  border: none;
+  background: transparent;
+  color: #a5b4fc;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tag-remove:hover {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+/* 已完成任务的胶囊：灰化 */
+.task-item.done .tag-chip {
+  background: #f3f4f6;
+  color: #c4c9d3;
+}
+
+/* "＋标签"入口：虚线胶囊按钮 */
+.tag-add-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px dashed #c7c9f9;
+  border-radius: 999px;
+  background: transparent;
+  color: #818cf8;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.tag-add-btn:hover {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+/* 行内标签输入框（点"＋标签"出现） */
+.tag-input-inline {
+  width: 110px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #1f2937;
+  border: 2px solid #6366f1;
+  border-radius: 999px;
+  outline: none;
+  background: #f8f9ff;
+}
+
+/* ========== 标签候选下拉面板 ========== */
+.tag-suggest {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(31, 41, 55, 0.18);
+  padding: 4px;
+}
+
+.tag-suggest-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #374151;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tag-suggest-item:hover,
+.tag-suggest-item.highlight {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+/* 无匹配候选时的占位提示 */
+.tag-suggest-empty {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #9ca3af;
+  text-align: center;
 }
 
 /* 仅"新添加"的任务播放淡入动画（整表重建时其他任务不重播，避免抖动闪烁） */
@@ -194,6 +395,7 @@ body::before {
 
 .task-text {
   flex: 1;
+  min-width: 0; /* 长文本可收缩，避免撑破容器导致横向溢出 */
   font-size: 15px;
   line-height: 1.5;
   word-break: break-all;

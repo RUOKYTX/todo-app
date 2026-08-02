@@ -73,7 +73,7 @@
         </div>
       </header>
 
-      <!-- 添加任务的输入区（任务文字 + 选填截止时间 + 添加按钮） -->
+      <!-- 添加任务的输入区（第一行：任务文字 + 添加按钮；第二行：截止时间 + 标签） -->
       <form id="add-form" class="add-form">
         <input
           type="text"
@@ -82,14 +82,25 @@
           maxlength="100"
           autocomplete="off"
         >
+        <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
         <input
           type="datetime-local"
           id="due-input"
           class="due-input"
           aria-label="截止时间（选填）"
         >
-        <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
+        <input
+          type="text"
+          id="tag-input"
+          class="tag-input"
+          placeholder="标签（选填，逗号分隔）"
+          maxlength="60"
+          autocomplete="off"
+        >
       </form>
+
+      <!-- 标签筛选栏：全部 + 各标签胶囊（JS 动态生成） -->
+      <div id="tag-filter" class="tag-filter"></div>
 
       <!-- 任务统计（合并显示：共/已完成/未完成，无任务时隐藏） -->
       <p id="counter" class="counter"></p>
@@ -115,11 +126,14 @@
     </div>
   </div>
 
-  <!-- 轻量成功提示 -->
-  <div id="toast" class="toast"></div>
+      <!-- 轻量成功提示 -->
+      <div id="toast" class="toast"></div>
 
-  <!-- supabase-js CDN 引入（必须先于 script.js 加载） -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+      <!-- 标签候选下拉面板（JS 动态生成内容） -->
+      <div id="tag-suggest" class="tag-suggest" hidden></div>
+
+      <!-- supabase-js 本地引入（必须先于 script.js 加载；CDN 在部分网络环境下不可达，本地化保证可用） -->
+  <script src="vendor/supabase.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

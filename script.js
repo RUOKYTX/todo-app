@@ -34,6 +34,9 @@ const authError = document.getElementById("auth-error");
 const form = document.getElementById("add-form");
 const input = document.getElementById("task-input");
 const dueInput = document.getElementById("due-input");
+const tagInput = document.getElementById("tag-input");
+const tagFilter = document.getElementById("tag-filter");
+const tagSuggest = document.getElementById("tag-suggest");
 const list = document.getElementById("task-list");
 const counter = document.getElementById("counter");
 const statsText = document.getElementById("stats-text");
@@ -80,21 +83,54 @@ async function fetchTasks() {
     console.error("加载任务失败：", error.message);
     return null; // 返回 null 表示拉取失败（调用方据此保留现状，避免误清列表）
   }
-  // 数据库字段 task/done/due_date → 前端字段 text/done/due_date，id 直接复用主键
+  // 数据库字段 task/done/due_date/tags → 前端字段 text/done/due_date/tags，id 直接复用主键
   return data.map((row) => ({
     id: row.id,
     text: row.task,
     done: row.done,
     due_date: row.due_date,
+    tags: parseTags(row.tags),
   }));
+}
+
+/* ---------- 标签纯函数（容错解析，可单测） ---------- */
+
+// 数据库 tags 列（JSON 数组字符串）→ 前端数组；null/空/非法 JSON/非字符串元素一律容错为 []
+function parseTags(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((t) => typeof t === "string" && t.trim()).map((t) => t.trim());
+  } catch {
+    return [];
+  }
+}
+
+// 用户输入（逗号分隔，支持中英文逗号）→ 标签数组：trim/去空/去重，单标签 ≤12 字符、每任务 ≤5 个
+function parseTagInput(str) {
+  if (typeof str !== "string" || !str.trim()) return [];
+  const seen = new Set();
+  const out = [];
+  for (const part of str.split(/[,，]/)) {
+    const t = part.trim();
+    if (!t || t.length > 12 || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 5) break;
+  }
+  return out;
 }
 
 // 登录后：拉任务 + 渲染 + 建立实时订阅
 async function loadTasksForUser() {
   const fresh = await fetchTasks();
-  if (fresh !== null) tasks = fresh; // 初始加载失败则保持空列表（空状态提示兜底）
+  // 竞态保护：若期间已有乐观插入（临时负 id 任务），说明用户已开始操作，
+  // 此时登录加载的旧快照不得覆盖新插入的任务（否则任务会短暂"消失"）
+  if (fresh !== null && !tasks.some((t) => t.id < 0)) tasks = fresh;
   render();
   subscribeRealtime();
+  window.__tasksLoaded = true; // 测试钩子：登录首次加载完成（registerUser 等待）
 }
 
 /* ---------- 实时同步（postgres_changes 订阅） ---------- */
@@ -103,6 +139,9 @@ async function loadTasksForUser() {
 function subscribeRealtime() {
   // 幂等：若已有旧通道先移除，避免重复订阅
   if (tasksChannel) supabaseClient.removeChannel(tasksChannel);
+
+  // 测试钩子：订阅就绪标记（E2E 等待实时通道建立后操作，避免错过事件）
+  window.__realtimeReady = false;
 
   tasksChannel = supabaseClient
     .channel("todos-realtime")
@@ -124,7 +163,9 @@ function subscribeRealtime() {
         }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") window.__realtimeReady = true;
+    });
 }
 
 // 登出时移除订阅
@@ -137,19 +178,23 @@ function unsubscribeRealtime() {
 
 /* ---------- 渲染 ---------- */
 
-// 根据 tasks 数组重绘整个列表
+// 根据 tasks 数组重绘整个列表（筛选生效时只渲染匹配任务）
 function render() {
   // 记录重建前的任务 id 集合：只给"新添加"的任务播放淡入动画
   const prevIds = new Set([...list.children].map((li) => li.dataset.id));
 
   list.innerHTML = "";
 
-  tasks.forEach((task) => {
+  getVisibleTasks().forEach((task) => {
     // 创建任务项 <li>（新任务带 new-item 类触发淡入，其余不重播动画避免闪烁）
     const item = document.createElement("li");
     const isNew = !prevIds.has(String(task.id));
     item.className = "task-item" + (task.done ? " done" : "") + (isNew ? " new-item" : "");
     item.dataset.id = task.id;
+
+    // 第一行：圆形勾选框 + 任务文字 + 截止日期徽章 + 删除按钮
+    const rowMain = document.createElement("div");
+    rowMain.className = "task-row-main";
 
     // 圆形勾选框（点击切换完成状态）
     const box = document.createElement("span");
@@ -178,14 +223,43 @@ function render() {
     del.setAttribute("aria-label", "删除任务");
 
     // 徽章插在文字与删除按钮之间；无截止时间的任务保持原有布局
-    item.append(box, text, dueBadge ?? document.createDocumentFragment(), del);
+    rowMain.append(box, text, dueBadge ?? document.createDocumentFragment(), del);
+
+    // 第二行：标签胶囊区（每枚胶囊带内嵌 × 删除）+ "＋标签"入口
+    const chips = document.createElement("div");
+    chips.className = "tag-chips";
+    (task.tags || []).forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip";
+      chip.dataset.tag = tag;
+      const name = document.createElement("span");
+      name.className = "tag-name";
+      name.textContent = tag;
+      const rm = document.createElement("button");
+      rm.className = "tag-remove";
+      rm.textContent = "×";
+      rm.setAttribute("aria-label", `删除标签 ${tag}`);
+      chip.append(name, rm);
+      chips.appendChild(chip);
+    });
+    const addTagBtn = document.createElement("button");
+    addTagBtn.className = "tag-add-btn";
+    addTagBtn.textContent = "＋标签";
+    chips.appendChild(addTagBtn);
+
+    item.append(rowMain, chips);
     list.appendChild(item);
   });
 
-  // 更新统计行（统一由 updateUnfinishedCount 输出）、顶部统计与空状态提示
+  // 更新统计行（统一由 updateUnfinishedCount 输出）、顶部统计、筛选栏与空状态提示
   updateUnfinishedCount();
   updateHeaderStats();
-  emptyTip.style.display = tasks.length ? "none" : "block";
+  renderTagFilter();
+  const shownCount = getVisibleTasks().length;
+  emptyTip.style.display = shownCount ? "none" : "block";
+  if (!shownCount) {
+    emptyTip.textContent = activeTag ? "该标签下暂无任务" : "暂无任务，先添加一条吧 ✨";
+  }
 }
 
 /* ---------- 截止日期工具函数（纯函数，便于单测） ---------- */
@@ -234,14 +308,15 @@ function toLocalInputValue(iso) {
 
 /* ---------- 顶部统计（日期行右侧："未完成 x / 共 y"） ---------- */
 
-// 更新顶部统计：无任务时隐藏（CSS :empty 兜底隐藏）
+// 更新顶部统计：无任务时隐藏（CSS :empty 兜底隐藏）；数字基于筛选后的可见列表
 function updateHeaderStats() {
-  const total = tasks.length;
+  const shown = getVisibleTasks();
+  const total = shown.length;
   if (!total) {
     statsText.textContent = "";
     return;
   }
-  const undone = tasks.filter((t) => !t.done).length;
+  const undone = shown.filter((t) => !t.done).length;
   statsText.textContent = `未完成 ${undone} / 共 ${total}`;
 }
 
@@ -251,8 +326,8 @@ function updateHeaderStats() {
 let tempIdCounter = 0;
 
 // 添加任务：乐观更新（本地立即显示，后台写库，成功后静默替换真实 id）
-// dueDate 为截止时间（"YYYY-MM-DDTHH:mm" 或 null）
-async function addTask(text, dueDate) {
+// dueDate 为截止时间（"YYYY-MM-DDTHH:mm" 或 null）；tags 为标签数组（可为空）
+async function addTask(text, dueDate, tags = []) {
   const trimmed = text.trim();
   if (!trimmed || !currentUser) return; // 空输入或未登录时忽略
   // 规范化：datetime-local 值按本地时区解析后转 ISO（避免无时区字符串被按 UTC 存储导致 +8 偏移）
@@ -260,14 +335,14 @@ async function addTask(text, dueDate) {
 
   // ① 乐观：本地用临时负 id 插入并立即渲染（任务瞬间出现）
   const tempId = --tempIdCounter;
-  tasks.push({ id: tempId, text: trimmed, done: false, due_date: due });
+  tasks.push({ id: tempId, text: trimmed, done: false, due_date: due, tags });
   render();
   updateUnfinishedCount();
 
   // ② 后台插入（.select() 拿数据库生成的真实 id）
   const { data, error } = await supabaseClient
     .from("todos")
-    .insert({ task: trimmed, done: false, due_date: due, user_id: currentUser.id })
+    .insert({ task: trimmed, done: false, due_date: due, tags: JSON.stringify(tags), user_id: currentUser.id })
     .select();
   if (error) {
     // 失败：移除自己的临时行 + 尽力对齐（对齐失败时保留本地回滚后的列表）
@@ -296,14 +371,15 @@ async function addTask(text, dueDate) {
   }
 }
 
-// 更新统计信息：已完成/未完成合并显示在一行；无任务时不显示
+// 更新统计信息：已完成/未完成合并显示在一行；无任务（或筛选后无结果）时不显示
 function updateUnfinishedCount() {
-  const total = tasks.length;
+  const shown = getVisibleTasks();
+  const total = shown.length;
   if (!total) {
     counter.textContent = ""; // 无任务时不显示统计行
     return;
   }
-  const doneCount = tasks.filter((t) => t.done).length;
+  const doneCount = shown.filter((t) => t.done).length;
   counter.textContent = `共 ${total} 项，已完成 ${doneCount} 项，未完成 ${total - doneCount} 项`;
 }
 
@@ -436,6 +512,223 @@ async function updateDueDate(id, newDue) {
   }
 }
 
+// 修改任务的标签集合（乐观更新：本地立即生效，后台写库，失败回滚对齐）
+async function updateTags(id, newTags, oldTags) {
+  const task = tasks.find((t) => String(t.id) === String(id));
+  if (!task) return;
+
+  // ① 乐观：本地立即更新并渲染（胶囊即时变化）
+  task.tags = newTags;
+  render();
+  recentIds.add(Number(id)); // 跳过 update 事件，避免重复刷新
+
+  // 测试钩子：写库开始（供自动化断言等待写库完成）
+  window.__tagsWriteDone = false;
+
+  // ② 后台写库（不 select、不 fetchTasks：本地已是最终状态）
+  try {
+    const { error } = await supabaseClient
+      .from("todos")
+      .update({ tags: JSON.stringify(newTags) })
+      .eq("id", id);
+    if (error) {
+      // ③ 失败：回滚标签 + 尽力对齐（对齐失败时保留回滚后的本地状态）
+      console.error("修改标签失败：", error.message);
+      recentIds.delete(Number(id));
+      task.tags = oldTags;
+      const fresh = await fetchTasks();
+      if (fresh !== null) {
+        tasks = fresh;
+        render();
+        return;
+      }
+      render();
+    }
+  } finally {
+    // 测试钩子：写库结束（成功或失败回滚都算结束）
+    window.__tagsWriteDone = true;
+  }
+}
+
+/* ---------- 标签筛选 ---------- */
+
+// 当前筛选标签：null = 全部
+let activeTag = null;
+
+// 派生列表：筛选生效时只返回带该标签的任务
+function getVisibleTasks() {
+  return activeTag ? tasks.filter((t) => (t.tags || []).includes(activeTag)) : tasks;
+}
+
+// 渲染筛选栏："全部" + 各标签胶囊（按使用频次降序）；当前筛选标签被删光时自动回落"全部"
+function renderTagFilter() {
+  const counts = new Map();
+  tasks.forEach((t) =>
+    (t.tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1))
+  );
+  if (activeTag && !counts.has(activeTag)) activeTag = null; // 筛选标签已不存在 → 回落全部
+
+  tagFilter.innerHTML = "";
+  const allBtn = document.createElement("button");
+  allBtn.className = "tag-filter-btn" + (activeTag === null ? " active" : "");
+  allBtn.textContent = "全部";
+  allBtn.dataset.tag = "";
+  tagFilter.appendChild(allBtn);
+
+  [...counts.entries()]
+    .sort((a, b) => b[1] - a[1]) // 使用频次降序
+    .forEach(([tag]) => {
+      const btn = document.createElement("button");
+      btn.className = "tag-filter-btn" + (activeTag === tag ? " active" : "");
+      btn.textContent = tag;
+      btn.dataset.tag = tag;
+      tagFilter.appendChild(btn);
+    });
+}
+
+// 筛选栏点击：切换 activeTag 并重渲染
+tagFilter.addEventListener("click", (e) => {
+  const btn = e.target.closest(".tag-filter-btn");
+  if (!btn) return;
+  activeTag = btn.dataset.tag || null;
+  render();
+});
+
+/* ---------- 标签记忆（localStorage 按账号隔离） ---------- */
+
+// 记忆 key：按用户隔离（登出后 key 不存在，天然隔离）
+function tagMemoryKey() {
+  return currentUser ? `tag_memory_${currentUser.id}` : null;
+}
+
+// 读取历史标签（最近使用在前）
+function loadTagMemory() {
+  const key = tagMemoryKey();
+  if (!key) return [];
+  try {
+    const arr = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(arr) ? arr.filter((t) => typeof t === "string" && t) : [];
+  } catch {
+    return [];
+  }
+}
+
+// 记录一次标签使用：去重 + 提到最前 + 上限 30
+function rememberTag(tag) {
+  const key = tagMemoryKey();
+  if (!key || !tag) return;
+  const arr = loadTagMemory().filter((t) => t !== tag);
+  arr.unshift(tag);
+  arr.length = Math.min(arr.length, 30);
+  try {
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch {
+    /* 存储不可用时静默忽略 */
+  }
+}
+
+// 收集候选：历史 ∪ 当前任务中出现的标签，按使用频次降序，排除已输入与已选中的
+function collectTagCandidates(inputText) {
+  const used = new Set(parseTagInput(inputText));
+  const parts = String(inputText || "").split(/[,，]/);
+  const prefix = parts[parts.length - 1].trim(); // 用最后一段做前缀过滤
+  const counts = new Map();
+  loadTagMemory().forEach((t) => counts.set(t, (counts.get(t) || 0) + 1));
+  tasks.forEach((t) =>
+    (t.tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1))
+  );
+  return [...counts.keys()]
+    .filter((t) => !used.has(t) && (!prefix || t.includes(prefix)))
+    .sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0))
+    .slice(0, 8);
+}
+
+/* ---------- 标签候选下拉面板（绑定输入框，点击/键盘选择） ---------- */
+
+let suggestInput = null; // 当前绑定下拉的输入框
+let suggestItems = []; // 当前候选按钮列表
+let suggestHighlight = -1; // 键盘高亮索引
+
+// 打开下拉：收集候选、定位在输入框下方
+function openTagSuggest(inputEl) {
+  suggestInput = inputEl;
+  const cands = collectTagCandidates(inputEl.value);
+  suggestHighlight = -1;
+  suggestItems = [];
+  tagSuggest.innerHTML = "";
+
+  if (!cands.length) {
+    const empty = document.createElement("div");
+    empty.className = "tag-suggest-empty";
+    empty.textContent = "无更多候选标签";
+    tagSuggest.appendChild(empty);
+  } else {
+    cands.forEach((tag) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "tag-suggest-item";
+      btn.textContent = tag;
+      btn.dataset.tag = tag;
+      // mousedown 阻止默认：避免输入框失焦触发保存/关闭，click 照常执行
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => pickTagSuggestion(inputEl, tag));
+      tagSuggest.appendChild(btn);
+      suggestItems.push(btn);
+    });
+  }
+
+  const rect = inputEl.getBoundingClientRect();
+  tagSuggest.style.top = `${rect.bottom + 6}px`;
+  tagSuggest.style.left = `${Math.min(rect.left, window.innerWidth - 200)}px`;
+  tagSuggest.hidden = false;
+}
+
+// 选中候选：追加到输入框（逗号分隔），刷新候选列表
+function pickTagSuggestion(inputEl, tag) {
+  if (!tag) return;
+  const cur = String(inputEl.value || "").replace(/[,，]+$/, "").trim();
+  inputEl.value = cur ? `${cur}，${tag}` : tag;
+  inputEl.focus();
+  openTagSuggest(inputEl);
+}
+
+// 键盘高亮移动（方向键）
+function moveTagHighlight(dir) {
+  if (!suggestItems.length) return;
+  suggestHighlight += dir;
+  if (suggestHighlight < 0) suggestHighlight = suggestItems.length - 1;
+  if (suggestHighlight >= suggestItems.length) suggestHighlight = 0;
+  suggestItems.forEach((btn, i) => btn.classList.toggle("highlight", i === suggestHighlight));
+}
+
+// 关闭下拉
+function closeTagSuggest() {
+  tagSuggest.hidden = true;
+  suggestInput = null;
+  suggestItems = [];
+  suggestHighlight = -1;
+}
+
+// 给任意输入框绑定候选下拉（聚焦/输入弹出，方向键+回车选择）
+function attachTagSuggest(inputEl) {
+  inputEl.addEventListener("focus", () => openTagSuggest(inputEl));
+  inputEl.addEventListener("input", () => openTagSuggest(inputEl));
+  inputEl.addEventListener("keydown", (e) => {
+    if (tagSuggest.hidden) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      moveTagHighlight(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      moveTagHighlight(-1);
+    } else if (e.key === "Enter" && suggestHighlight >= 0 && suggestItems[suggestHighlight]) {
+      e.preventDefault();
+      pickTagSuggestion(inputEl, suggestItems[suggestHighlight].dataset.tag);
+    }
+  });
+  inputEl.addEventListener("blur", () => closeTagSuggest());
+}
+
 /* ---------- 编辑任务文字（双击进入编辑） ---------- */
 
 // 把任务文字替换为输入框进行编辑
@@ -518,6 +811,79 @@ function startDueEdit(item, badgeEl) {
   // 回车 → 保存；Esc → 取消
   editInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") finish(true);
+    if (e.key === "Escape") finish(false);
+  });
+
+  // 点击别处失焦 → 保存
+  editInput.addEventListener("blur", () => finish(true));
+}
+
+/* ---------- 编辑任务标签（行内添加 / 胶囊 × 删除） ---------- */
+
+// 删除任务上的单个标签（乐观更新 + 落库）
+function removeTagFromTask(id, tag) {
+  const task = tasks.find((t) => String(t.id) === id);
+  if (!task || task.done) return;
+  const old = [...(task.tags || [])];
+  const next = old.filter((t) => t !== tag);
+  if (next.length === old.length) return; // 标签不存在，忽略
+  updateTags(id, next, old);
+}
+
+// 点"＋标签"→ 行内输入框（回车确认 / Esc 取消 / 失焦确认，与双击编辑范式一致）
+function startTagAdd(item) {
+  const id = item.dataset.id;
+  const task = tasks.find((t) => String(t.id) === id);
+  if (!task || task.done) return; // 已完成任务不允许加标签
+
+  const addTagBtn = item.querySelector(".tag-add-btn");
+  if (!addTagBtn) return;
+  const editInput = document.createElement("input");
+  editInput.className = "tag-input-inline";
+  editInput.maxLength = 60;
+  editInput.placeholder = "输入标签，回车确认";
+  addTagBtn.replaceWith(editInput);
+  editInput.focus();
+  attachTagSuggest(editInput); // 行内输入同样支持历史候选
+
+  // finished 标志防止 回车+失焦 导致重复保存/渲染
+  let finished = false;
+
+  function finish(save) {
+    if (finished) return;
+    finished = true;
+    closeTagSuggest();
+
+    if (save) {
+      const tags = parseTagInput(editInput.value);
+      if (tags.length) {
+        // 合并进现有标签（去重、上限 5 个）
+        const old = [...(task.tags || [])];
+        const merged = [];
+        const seen = new Set();
+        for (const t of [...old, ...tags]) {
+          if (!seen.has(t)) {
+            seen.add(t);
+            merged.push(t);
+          }
+          if (merged.length >= 5) break;
+        }
+        if (merged.join("\u0001") !== old.join("\u0001")) {
+          updateTags(task.id, merged, old);
+          tags.forEach(rememberTag); // 记录到历史候选
+          return;
+        }
+      }
+    }
+    render(); // 取消、为空或内容未变：恢复原列表
+  }
+
+  // 回车 → 保存；Esc → 取消
+  editInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.stopPropagation(); // 避免触发表单提交
+      finish(true);
+    }
     if (e.key === "Escape") finish(false);
   });
 
@@ -660,10 +1026,18 @@ avatarBtn.addEventListener("click", (e) => {
   avatarMenu.classList.toggle("open");
 });
 
-// 点击页面其他区域 → 关闭菜单
+// 点击页面其他区域 → 关闭头像菜单与标签候选下拉
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".avatar-wrap")) {
     avatarMenu.classList.remove("open");
+  }
+  // 点击下拉面板或标签输入框本身时不关闭
+  if (
+    !e.target.closest(".tag-suggest") &&
+    !e.target.closest("#tag-input") &&
+    !e.target.closest(".tag-input-inline")
+  ) {
+    closeTagSuggest();
   }
 });
 
@@ -803,12 +1177,16 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
 
 /* ---------- 任务事件绑定 ---------- */
 
-// 表单提交（输入框回车 或 点＋按钮）→ 添加任务（含选填截止时间）
+// 表单提交（输入框回车 或 点＋按钮）→ 添加任务（含选填截止时间与标签）
 form.addEventListener("submit", (e) => {
   e.preventDefault();
-  addTask(input.value, dueInput.value || null);
+  closeTagSuggest(); // 提交后收起候选下拉
+  const tags = parseTagInput(tagInput.value);
+  addTask(input.value, dueInput.value || null, tags);
+  tags.forEach(rememberTag); // 新标签记入历史候选
   input.value = ""; // 清空输入框
   dueInput.value = ""; // 清空截止时间
+  tagInput.value = ""; // 清空标签
   input.focus(); // 保持焦点方便连续录入
 });
 
@@ -828,7 +1206,7 @@ list.addEventListener("dblclick", (e) => {
   startEdit(item, textEl);
 });
 
-// 事件委托：列表内的点击统一处理（勾选 / 删除）
+// 事件委托：列表内的点击统一处理（勾选 / 删除 / 标签增删）
 // 注意：点击圆圈才勾选，文字留给双击编辑（避免单击重建 DOM 吃掉双击事件）
 list.addEventListener("click", (e) => {
   // 双击的第二击（e.detail=2）忽略：避免"勾选→取消"来回抖动
@@ -842,6 +1220,17 @@ list.addEventListener("click", (e) => {
     deleteTask(id);
   } else if (e.target.classList.contains("checkbox")) {
     toggleTask(id);
+  } else if (e.target.closest(".tag-remove")) {
+    // 点击胶囊内 × → 删除该标签（已完成任务已禁用交互）
+    const chip = e.target.closest(".tag-chip");
+    if (chip && !item.classList.contains("done")) {
+      removeTagFromTask(id, chip.dataset.tag);
+    }
+  } else if (e.target.closest(".tag-add-btn")) {
+    // 点击"＋标签"→ 行内输入（已完成任务已禁用交互）
+    if (!item.classList.contains("done")) {
+      startTagAdd(item);
+    }
   }
 });
 
@@ -857,6 +1246,7 @@ function showToday() {
 // 页面加载：恢复登录态 → 决定显示哪个视图（刷新后自动保持登录）
 async function init() {
   showToday();
+  attachTagSuggest(tagInput); // 添加表单的标签框绑定历史候选下拉
 
   const { data } = await supabaseClient.auth.getSession();
   currentUser = data.session?.user ?? null;
