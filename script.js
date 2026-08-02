@@ -33,8 +33,10 @@ const authSwitchLink = document.getElementById("auth-switch-link");
 const authError = document.getElementById("auth-error");
 const form = document.getElementById("add-form");
 const input = document.getElementById("task-input");
+const dueInput = document.getElementById("due-input");
 const list = document.getElementById("task-list");
 const counter = document.getElementById("counter");
+const statsText = document.getElementById("stats-text");
 const emptyTip = document.getElementById("empty-tip");
 const dateText = document.getElementById("date-text");
 const avatarBtn = document.getElementById("avatar-btn");
@@ -78,8 +80,13 @@ async function fetchTasks() {
     console.error("加载任务失败：", error.message);
     return null; // 返回 null 表示拉取失败（调用方据此保留现状，避免误清列表）
   }
-  // 数据库字段 task/done → 前端字段 text/done，id 直接复用主键
-  return data.map((row) => ({ id: row.id, text: row.task, done: row.done }));
+  // 数据库字段 task/done/due_date → 前端字段 text/done/due_date，id 直接复用主键
+  return data.map((row) => ({
+    id: row.id,
+    text: row.task,
+    done: row.done,
+    due_date: row.due_date,
+  }));
 }
 
 // 登录后：拉任务 + 渲染 + 建立实时订阅
@@ -154,19 +161,88 @@ function render() {
     text.className = "task-text";
     text.textContent = task.text;
 
+    // 截止日期徽章（仅设置了截止时间的任务显示；逾期任务标红 + 已过期角标）
+    let dueBadge = null;
+    if (task.due_date) {
+      dueBadge = document.createElement("span");
+      const overdue = isOverdue(task);
+      dueBadge.className = "due-badge" + (overdue ? " overdue" : "");
+      dueBadge.textContent = formatDue(task);
+      dueBadge.setAttribute("aria-label", "截止时间（双击可修改）");
+    }
+
     // 删除按钮
     const del = document.createElement("button");
     del.className = "delete-btn";
     del.textContent = "✕";
     del.setAttribute("aria-label", "删除任务");
 
-    item.append(box, text, del);
+    // 徽章插在文字与删除按钮之间；无截止时间的任务保持原有布局
+    item.append(box, text, dueBadge ?? document.createDocumentFragment(), del);
     list.appendChild(item);
   });
 
-  // 更新统计行（统一由 updateUnfinishedCount 输出）与空状态提示
+  // 更新统计行（统一由 updateUnfinishedCount 输出）、顶部统计与空状态提示
   updateUnfinishedCount();
+  updateHeaderStats();
   emptyTip.style.display = tasks.length ? "none" : "block";
+}
+
+/* ---------- 截止日期工具函数（纯函数，便于单测） ---------- */
+
+// 逾期判定：未完成 且 截止时刻严格早于当前时刻（整点不算逾期）
+function isOverdue(task) {
+  if (!task.due_date || task.done) return false;
+  return new Date(task.due_date).getTime() < Date.now();
+}
+
+// 补零：8 → "08"
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+// 两日期是否同一天（本地时区）
+function isSameDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+// 徽章显示文案：今天/明天/月日 + 时分，跨年带年份
+function formatDue(task) {
+  const due = new Date(task.due_date);
+  const now = new Date();
+  const hhmm = `${pad2(due.getHours())}:${pad2(due.getMinutes())}`;
+
+  if (isSameDay(due, now)) return `今天 ${hhmm}`;
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (isSameDay(due, tomorrow)) return `明天 ${hhmm}`;
+
+  const md = `${due.getMonth() + 1}月${due.getDate()}日 ${hhmm}`;
+  return due.getFullYear() === now.getFullYear() ? md : `${due.getFullYear()}年${md}`;
+}
+
+// ISO 时间字符串 → datetime-local 输入框的值（"YYYY-MM-DDTHH:mm"，本地时区）
+function toLocalInputValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/* ---------- 顶部统计（日期行右侧："未完成 x / 共 y"） ---------- */
+
+// 更新顶部统计：无任务时隐藏（CSS :empty 兜底隐藏）
+function updateHeaderStats() {
+  const total = tasks.length;
+  if (!total) {
+    statsText.textContent = "";
+    return;
+  }
+  const undone = tasks.filter((t) => !t.done).length;
+  statsText.textContent = `未完成 ${undone} / 共 ${total}`;
 }
 
 /* ---------- 事件处理 ---------- */
@@ -175,20 +251,23 @@ function render() {
 let tempIdCounter = 0;
 
 // 添加任务：乐观更新（本地立即显示，后台写库，成功后静默替换真实 id）
-async function addTask(text) {
+// dueDate 为截止时间（"YYYY-MM-DDTHH:mm" 或 null）
+async function addTask(text, dueDate) {
   const trimmed = text.trim();
   if (!trimmed || !currentUser) return; // 空输入或未登录时忽略
+  // 规范化：datetime-local 值按本地时区解析后转 ISO（避免无时区字符串被按 UTC 存储导致 +8 偏移）
+  const due = dueDate ? new Date(dueDate).toISOString() : null;
 
   // ① 乐观：本地用临时负 id 插入并立即渲染（任务瞬间出现）
   const tempId = --tempIdCounter;
-  tasks.push({ id: tempId, text: trimmed, done: false });
+  tasks.push({ id: tempId, text: trimmed, done: false, due_date: due });
   render();
   updateUnfinishedCount();
 
   // ② 后台插入（.select() 拿数据库生成的真实 id）
   const { data, error } = await supabaseClient
     .from("todos")
-    .insert({ task: trimmed, done: false, user_id: currentUser.id })
+    .insert({ task: trimmed, done: false, due_date: due, user_id: currentUser.id })
     .select();
   if (error) {
     // 失败：移除自己的临时行 + 尽力对齐（对齐失败时保留本地回滚后的列表）
@@ -325,6 +404,38 @@ async function deleteTask(id) {
   }
 }
 
+// 修改任务的截止时间（乐观更新：本地立即生效，后台写库，失败回滚对齐）
+// newDue 为 "YYYY-MM-DDTHH:mm" 或 null（清空截止时间）
+async function updateDueDate(id, newDue) {
+  const task = tasks.find((t) => String(t.id) === String(id));
+  if (!task) return;
+
+  // ① 乐观：本地立即更新并渲染（编辑框即时退出，徽章立即变化）
+  const oldDue = task.due_date;
+  task.due_date = newDue;
+  render();
+  recentIds.add(Number(id)); // 跳过 update 事件，避免重复刷新
+
+  // ② 后台写库（不 select、不 fetchTasks：本地已是最终状态）
+  const { error } = await supabaseClient
+    .from("todos")
+    .update({ due_date: newDue })
+    .eq("id", id);
+  if (error) {
+    // ③ 失败：回滚截止时间 + 尽力对齐（对齐失败时保留回滚后的本地状态）
+    console.error("修改截止时间失败：", error.message);
+    recentIds.delete(Number(id));
+    task.due_date = oldDue;
+    const fresh = await fetchTasks();
+    if (fresh !== null) {
+      tasks = fresh;
+      render();
+      return;
+    }
+    render();
+  }
+}
+
 /* ---------- 编辑任务文字（双击进入编辑） ---------- */
 
 // 把任务文字替换为输入框进行编辑
@@ -366,6 +477,87 @@ function startEdit(item, textEl) {
 
   // 点击别处失焦 → 保存
   editInput.addEventListener("blur", () => finish(true));
+}
+
+/* ---------- 编辑任务截止时间（双击徽章进入编辑） ---------- */
+
+// 把截止日期徽章替换为 datetime-local 输入框进行编辑
+function startDueEdit(item, badgeEl) {
+  const id = item.dataset.id;
+  const task = tasks.find((t) => String(t.id) === id);
+  if (!task) return;
+
+  // 创建 datetime-local 输入框，预填当前截止时间
+  const editInput = document.createElement("input");
+  editInput.type = "datetime-local";
+  editInput.className = "due-edit-input";
+  editInput.value = toLocalInputValue(task.due_date);
+  badgeEl.replaceWith(editInput);
+  editInput.focus();
+
+  // finished 标志防止 回车+失焦 导致重复保存/渲染
+  let finished = false;
+
+  function finish(save) {
+    if (finished) return;
+    finished = true;
+
+    // 规范化：本地格式 → ISO 字符串（null = 清空截止时间）
+    const val = editInput.value;
+    const newDue = val ? new Date(val).toISOString() : null;
+    const curDue = task.due_date ? new Date(task.due_date).toISOString() : null;
+
+    // 保存时：值有变化 → 乐观更新（本地立即生效 + 后台写库）
+    if (save && newDue !== curDue) {
+      updateDueDate(task.id, newDue);
+      return;
+    }
+    render(); // 取消或值未变：恢复原列表
+  }
+
+  // 回车 → 保存；Esc → 取消
+  editInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(true);
+    if (e.key === "Escape") finish(false);
+  });
+
+  // 点击别处失焦 → 保存
+  editInput.addEventListener("blur", () => finish(true));
+}
+
+/* ---------- 逾期标记自动刷新（30 秒轻量轮询，不发网络请求） ---------- */
+
+let overdueTimer = null;
+
+// 每 30 秒检查一次：徽章的逾期状态或文案（跨天时"今天→明天"）是否过期，
+// 有变化才整表重渲染（render 内部动画去重，不会闪烁）
+function refreshDueMarks() {
+  let changed = false;
+  document.querySelectorAll(".task-item").forEach((item) => {
+    const task = tasks.find((t) => String(t.id) === item.dataset.id);
+    const badge = item.querySelector(".due-badge");
+    if (!task || !badge) return;
+    const ov = isOverdue(task);
+    if (ov !== badge.classList.contains("overdue")) {
+      changed = true;
+      return;
+    }
+    if (badge.textContent !== formatDue(task)) changed = true;
+  });
+  if (changed) render();
+}
+
+// 登录后启动定时器；登出时停止
+function startOverdueTimer() {
+  stopOverdueTimer();
+  overdueTimer = setInterval(refreshDueMarks, 30000);
+}
+
+function stopOverdueTimer() {
+  if (overdueTimer) {
+    clearInterval(overdueTimer);
+    overdueTimer = null;
+  }
 }
 
 /* ---------- 认证逻辑（注册 / 登录 / 登出） ---------- */
@@ -599,8 +791,10 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
 
   if (event === "SIGNED_IN") {
     showTodoView();
+    startOverdueTimer(); // 登录后启动逾期标记定时刷新
   } else if (event === "SIGNED_OUT") {
     unsubscribeRealtime();
+    stopOverdueTimer(); // 登出时停止定时器
     tasks = [];
     render();
     showAuthView();
@@ -609,16 +803,24 @@ supabaseClient.auth.onAuthStateChange((event, session) => {
 
 /* ---------- 任务事件绑定 ---------- */
 
-// 表单提交（输入框回车 或 点＋按钮）→ 添加任务
+// 表单提交（输入框回车 或 点＋按钮）→ 添加任务（含选填截止时间）
 form.addEventListener("submit", (e) => {
   e.preventDefault();
-  addTask(input.value);
+  addTask(input.value, dueInput.value || null);
   input.value = ""; // 清空输入框
+  dueInput.value = ""; // 清空截止时间
   input.focus(); // 保持焦点方便连续录入
 });
 
-// 双击任务文字 → 进入编辑模式（改为行内输入框）
+// 双击任务文字 → 编辑文字；双击日期徽章 → 编辑截止时间
 list.addEventListener("dblclick", (e) => {
+  const badgeEl = e.target.closest(".due-badge");
+  if (badgeEl) {
+    const item = badgeEl.closest(".task-item");
+    if (item.classList.contains("done")) return; // 已完成的任务不允许改期
+    startDueEdit(item, badgeEl);
+    return;
+  }
   const textEl = e.target.closest(".task-text");
   if (!textEl) return;
   const item = textEl.closest(".task-item");
@@ -660,6 +862,7 @@ async function init() {
   currentUser = data.session?.user ?? null;
   if (currentUser) {
     showTodoView();
+    startOverdueTimer(); // 刷新恢复登录态时同样启动定时器
   } else {
     showAuthView();
   }

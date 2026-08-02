@@ -66,10 +66,14 @@
             </div>
           </div>
         </div>
-        <p id="date-text"></p>
+        <!-- 日期行：左侧当天日期，右侧未完成/总数统计 -->
+        <div class="date-row">
+          <p id="date-text"></p>
+          <span id="stats-text" class="stats-text"></span>
+        </div>
       </header>
 
-      <!-- 添加任务的输入区 -->
+      <!-- 添加任务的输入区（任务文字 + 选填截止时间 + 添加按钮） -->
       <form id="add-form" class="add-form">
         <input
           type="text"
@@ -77,6 +81,12 @@
           placeholder="添加新的待办任务，按回车确认…"
           maxlength="100"
           autocomplete="off"
+        >
+        <input
+          type="datetime-local"
+          id="due-input"
+          class="due-input"
+          aria-label="截止时间（选填）"
         >
         <button type="submit" id="add-btn" aria-label="添加任务">＋</button>
       </form>

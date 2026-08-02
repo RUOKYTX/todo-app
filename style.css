@@ -51,6 +51,30 @@ body::before {
   color: #9ca3af;
 }
 
+/* 日期行：左侧当天日期，右侧顶部统计（"未完成 x / 共 y"） */
+.date-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.date-row #date-text {
+  margin-top: 0; /* 覆盖 .app-header p 的外边距，避免 flex 内出现多余间距 */
+}
+
+/* 顶部统计：无内容（无任务）时自动隐藏 */
+.stats-text {
+  font-size: 13px;
+  color: #9ca3af;
+  white-space: nowrap;
+}
+
+.stats-text:empty {
+  display: none;
+}
+
 /* ========== 输入区 ========== */
 .add-form {
   display: flex;
@@ -92,6 +116,24 @@ body::before {
 
 #add-btn:active {
   transform: scale(0.94);
+}
+
+/* 添加区的截止时间选择器：紧凑灰字，与任务输入框风格一致 */
+.due-input {
+  flex-shrink: 0;
+  width: 158px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #6b7280;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.due-input:focus {
+  border-color: #6366f1;
 }
 
 /* ========== 统计与空状态 ========== */
@@ -163,6 +205,58 @@ body::before {
 .task-item.done .task-text {
   color: #b0b6c0;
   text-decoration: line-through;
+}
+
+/* 截止日期徽章：小号圆角标签，默认灰底描边 */
+.due-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 3px 9px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  color: #6b7280;
+  background: #f9fafb;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* 逾期徽章：红字红描边浅红底 + "已过期"角标 */
+.due-badge.overdue {
+  color: #ef4444;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.due-badge.overdue::after {
+  content: "已过期";
+  margin-left: 6px;
+  font-size: 11px;
+  color: #fff;
+  background: #ef4444;
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+/* 已完成任务的徽章：灰化（逾期任务完成后红色自动消失） */
+.task-item.done .due-badge {
+  color: #c4c9d3;
+  border-color: #f3f4f6;
+  background: #f9fafb;
+}
+
+/* 编辑截止时间的行内 datetime-local 输入框（双击徽章出现） */
+.due-edit-input {
+  flex-shrink: 0;
+  width: 168px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1f2937;
+  border: 2px solid #6366f1;
+  border-radius: 8px;
+  outline: none;
+  background: #f8f9ff;
 }
 
 /* 编辑任务文字的行内输入框（双击任务文字出现） */
